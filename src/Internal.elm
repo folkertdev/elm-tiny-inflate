@@ -72,7 +72,7 @@ uncompressHelp output =
                 BitReader.map Done (uncompressBlock blockType)
 
             else
-                BitReader.map (Debug.log "loop" Loop) (uncompressBlock blockType)
+                BitReader.map Loop (uncompressBlock blockType)
     in
     BitReader.map2 go BitReader.getBit readTwoBits
         |> BitReader.andThen identity
