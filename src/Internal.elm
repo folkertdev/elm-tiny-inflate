@@ -65,7 +65,7 @@ uncompressHelp output =
                         |> BitReader.map (\v -> v :: output)
 
                 _ ->
-                    BitReader.error "invalid block type"
+                    BitReader.error ("invalid block type: " ++ String.fromInt btype ++ " (only 0, 1 and 2 are valid block types)")
 
         go isFinal blockType =
             if isFinal /= 0 then
