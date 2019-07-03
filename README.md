@@ -1,49 +1,53 @@
 # elm-tiny-inflate 
 
-Decompress deflate compressed data. Deflate compression is used in e.g. zip, png and woff.
-
-The api consists of just one function: `inflate : Bytes -> Maybe Bytes`.
+Decompress deflate compressed data. Deflate compression is used in the zip and gzip archive formats, but also as a building block in other file formats like png and woff. The package supports raw inflate, zlib, and gzip.
 
 ```elm
-import Bytes exposing (Bytes)
-import Bytes.Encode as Encode 
+import Bytes exposing (Bytes, Endianness(..))
+import Bytes.Decode as Decode
+import Bytes.Encode as Encode
 import Inflate
 
-deyrfé : String
-deyrfé =
-    "Deyr fé, deyja frændr"
+{-| Some sample text
+-}
+text : String
+text =
+    "Myn geast ferdizet"
 
--- string compressed with zlib
-compressed : Bytes.Bytes
-compressed =
-    [ 115, 73, 173, 44, 82, 72, 59, 188, 82, 71, 33, 37
-    , 181, 50, 43, 81, 33, 173, 232, 240, 178, 188, 148
-    , 34, 46, 0 
+{-| The `text` compressed with raw deflate
+
+The bytes are combined into 32bit integers using
+hex notation so they are shorter in the docs
+
+-}
+textCompressedBytes =
+    [ 0xF3ADCC53
+    , 0x484F4D2C
+    , 0x2E51484B
+    , 0x2D4AC9AC
+    , 0x4A2D0100
     ]
-        |> List.map Encode.unsignedInt8
+        |> List.map (Encode.unsignedInt32 BE)
         |> Encode.sequence
         |> Encode.encode
 
-decompressedLength : Int 
-decompressedLength = 
-    -- + 2 because string uses 2 non-ascii characters 
-    -- (they take an extra byte)
-    String.length deyrfé + 2
+decodeString : Bytes -> Maybe String
+decodeString buffer =
+    let
+        decoder =
+            Decode.string (Encode.getStringWidth text)
+    in
+    Decode.decode decoder buffer
 
-decode : Bytes -> Maybe String
-decode =
-    Decode.decode (Decode.string decompressedLength)
-
-decompressed : String
 decompressed =
-    Inflate.inflate compressed 
-        |> Maybe.andThen decode
+    textCompressedBytes
+        |> Inflate.inflate
+        |> Maybe.andThen decodeString
         |> Maybe.withDefault ""
-        --> "Deyr fé, deyja frændr"
 ```
 
 Here the deflated data is given as a list of bytes, in practice you would probably load the `Bytes` directly. 
-The inflation is only a small step in the process, I've included the full decoding of the compressed string
+The inflation is only a small step in the process: I've included the full decoding of the compressed string
 to show what that looks like.
 
 ## Thanks 
