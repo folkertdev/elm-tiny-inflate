@@ -1,18 +1,35 @@
 module TestInflate exposing (suite)
 
+import Adler32
 import Array
 import BitReader
 import Bitwise
 import Bytes exposing (Bytes)
 import Bytes.Decode as Decode
 import Bytes.Encode as Encode
+import Crc32
 import Expect exposing (Expectation, FloatingPointTolerance(..))
 import Fuzz exposing (Fuzzer, int, list, string)
+import GZip
 import Inflate as External
 import Internal as Inflate
 import Test exposing (..)
 import TestData.Havamal as Havamal
 import TestData.Lorem as Lorem
+import ZLib
+
+
+exactly n decoder =
+    let
+        go ( i, accum ) =
+            if i < n then
+                decoder
+                    |> Decode.map (\v -> Decode.Loop ( i + 1, v :: accum ))
+
+            else
+                Decode.succeed (Decode.Done (List.reverse accum))
+    in
+    Decode.loop ( 0, [] ) go
 
 
 suite =
@@ -23,7 +40,131 @@ suite =
         , havamal
         , lorem
         , example
+        , adler32
+        , various
+        , crc32
         ]
+
+
+adler32 =
+    let
+        setup expected data =
+            test (Debug.toString data) <|
+                \_ ->
+                    data
+                        |> toBuffer
+                        |> Adler32.adler32
+                        |> Expect.equal expected
+    in
+    describe "adler32 checksum"
+        [ setup 131074 [ 1 ]
+        , setup 196611 [ 2 ]
+        , setup 88473791 [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 ]
+        , setup 1604860569 (List.concat (List.repeat 1000 [ 1, 2, 3, 4, 5 ]))
+        ]
+
+
+crc32 =
+    let
+        setup expected data =
+            test (Debug.toString data) <|
+                \_ ->
+                    data
+                        |> toBuffer
+                        |> Crc32.crc32
+                        |> Expect.equal expected
+    in
+    describe "crc32 checksum"
+        [ setup 2768625435 [ 1 ]
+        , setup 1007455905 [ 2 ]
+        ]
+
+
+toBuffer =
+    List.map Encode.unsignedInt8
+        >> Encode.sequence
+        >> Encode.encode
+
+
+various =
+    describe "various"
+        [ test "foo dynamic" <|
+            \_ ->
+                [ 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06 ]
+                    |> toBuffer
+                    |> External.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , test "foo static" <|
+            \_ ->
+                [ 0x4B, 0xCB, 0xCF, 0x07, 0x00 ]
+                    |> toBuffer
+                    |> External.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , test "foo none" <|
+            \_ ->
+                [ 0x01, 0x03, 0x00, 0xFC, 0xFF, 0x66, 0x6F, 0x6F ]
+                    |> toBuffer
+                    |> External.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , test "zlib foo none" <|
+            \_ ->
+                [ 0x78, 0x01, 0x01, 0x03, 0x00, 0xFC, 0xFF, 0x66, 0x6F, 0x6F, 0x02, 0x82, 0x01, 0x45 ]
+                    |> toBuffer
+                    |> ZLib.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , test "zlib foo fixed" <|
+            \_ ->
+                [ 0x78, 0x5E, 0x4B, 0xCB, 0xCF, 0x07, 0x00, 0x02, 0x82, 0x01, 0x45 ]
+                    |> toBuffer
+                    |> ZLib.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , test "zlib foo dynamic" <|
+            \_ ->
+                [ 0x78, 0x9C, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x02, 0x82, 0x01, 0x45 ]
+                    |> toBuffer
+                    |> ZLib.inflate
+                    |> Maybe.andThen (Decode.decode (Decode.string 3))
+                    |> Expect.equal (Just "foo")
+        , describe "gzip foo" <|
+            let
+                setup name hexes =
+                    test name <|
+                        \_ ->
+                            hexes
+                                |> toBuffer
+                                |> GZip.inflate
+                                |> Maybe.andThen (Decode.decode (Decode.string 3))
+                                |> Expect.equal (Just "foo")
+            in
+            [ setup "dynamic" [ 0x1F, 0x8B, 0x08, 0x00, 0xED, 0xC1, 0x1B, 0x5D, 0x00, 0xFF, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x21, 0x65, 0x73, 0x8C, 0x03, 0x00, 0x00, 0x00 ]
+            , setup "dynamic with fname" [ 0x1F, 0x8B, 0x08, 0x08, 0x5F, 0xCA, 0x1B, 0x5D, 0x00, 0xFF, 0x66, 0x6F, 0x6F, 0x2E, 0x74, 0x78, 0x74, 0x00, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x21, 0x65, 0x73, 0x8C, 0x03, 0x00, 0x00, 0x00 ]
+            , setup "dynamic with fname and fcomment" [ 0x1F, 0x8B, 0x08, 0x08, 0x8D, 0xCA, 0x1B, 0x5D, 0x00, 0xFF, 0x66, 0x6F, 0x6F, 0x2E, 0x74, 0x78, 0x74, 0x00, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x21, 0x65, 0x73, 0x8C, 0x03, 0x00, 0x00, 0x00 ]
+
+            , setup "dynamic with fname and fcomment and checksum" [ 0x1f, 0x8b, 0x08, 0x0a, 0xb5, 0x98, 0x1c, 0x5d, 0x00, 0xff, 0x62, 0x61, 0x72, 0x00, 0xbc, 0x0b, 0x05, 0xc0, 0x21, 0x0d, 0x00, 0x00, 0x00, 0x80, 0xb0, 0xb6, 0xd8, 0xf7, 0x77, 0x2c, 0x06, 0x21, 0x65, 0x73, 0x8c, 0x03, 0x00, 0x00, 0x00 ]
+
+            , setup "dynamic with checksum" [ 0x1F, 0x8B, 0x08, 0x02, 0x62, 0xD8, 0x1B, 0x5D, 0x00, 0xFF, 0x24, 0x3E, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x21, 0x65, 0x73, 0x8C, 0x03, 0x00, 0x00, 0x00 ]
+            ]
+        ]
+
+
+zlib =
+    test "zlib" <|
+        \_ ->
+            let
+                data =
+                    [ 0x78, 0x9C, 0x63, 0x60, 0x40, 0x05, 0x32, 0x0C, 0x98, 0x00, 0x00, 0x02, 0x54, 0x00, 0x1D ]
+                        |> List.map Encode.unsignedInt8
+                        |> Encode.sequence
+                        |> Encode.encode
+            in
+            ZLib.inflate data
+                |> Maybe.andThen (\buffer -> Decode.decode (exactly 6 Decode.unsignedInt8) buffer)
+                |> Expect.equal (Just [ 0, 0, 0, 28, 0, 0 ])
 
 
 example =
