@@ -3,7 +3,7 @@
     "name": "folkertdev/elm-tiny-inflate",
     "summary": "Inflate data compressed with a deflate (zip, gzip, woff, png)",
     "license": "MPL-2.0",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "exposed-modules": [
         "Inflate"
     ],
