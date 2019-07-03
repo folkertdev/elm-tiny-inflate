@@ -212,39 +212,33 @@ decodeSymbol tree =
 
                 Ok d ->
                     let
-                        help2 cur tag len sum =
-                            let
-                                newLen =
-                                    1 + len
+                        unsafeGet i a = 
+                            case Array.get i a of 
+                                Nothing -> 0
+                                Just v -> v 
+
+                        innerLoop cur tag len sum = 
+                            let newCur = 2 * cur + (Bitwise.and tag 1)
+                                newTag = Bitwise.shiftRightZfBy 1 tag 
+                                newLen = len + 1 
+
+                                newSum = sum + unsafeGet newLen tree.table 
+                                newerCur = newCur - unsafeGet newLen tree.table 
                             in
-                            case Array.get newLen tree.table of
-                                Nothing ->
-                                    ( Array.get (sum + cur) tree.trans
-                                        |> Maybe.withDefault -10
-                                    , { d
-                                        | tag = tag
-                                        , bitcount = d.bitcount - len
-                                      }
-                                    )
+                                if newerCur >= 0 then 
+                                    innerLoop newerCur newTag newLen  newSum 
+                                else 
+                                    ( (newerCur , newTag), newLen , newSum )
 
-                                Just value ->
-                                    let
-                                        newCur =
-                                            (2 * cur + Bitwise.and tag 1) - value
-                                    in
-                                    if newCur >= 0 then
-                                        help2 newCur (Bitwise.shiftRightZfBy 1 tag) newLen (sum + value)
 
-                                    else
-                                        ( Array.get (sum + value + newCur) tree.trans
-                                            |> Maybe.withDefault -10
-                                        , { d
-                                            | tag = Bitwise.shiftRightZfBy 1 tag
-                                            , bitcount = d.bitcount - newLen
-                                          }
-                                        )
+                        
                     in
-                    Ok (help2 0 d.tag 0 0)
+                        let ((cur, tag), len, sum ) = innerLoop 0 d.tag 0 0 
+
+                            result = unsafeGet (sum + cur) tree.trans
+
+                        in
+                    Ok (result, { d | tag = tag, bitcount   = d.bitcount - len } ) 
 
 
 
@@ -335,26 +329,52 @@ decodeDynamicTreeLength codeTree hlit hdist ( i, lengths ) =
 
 inflateBlockData : Tree -> Tree -> Int -> Array Int -> BitReader (Array Int)
 inflateBlockData lt dt outputLength output =
-    BitReader.loop output (inflateBlockDataHelp lt dt outputLength)
+
+    BitReader.loop (outputLength, output) (inflateBlockDataHelp lt dt )
 
 
-inflateBlockDataHelp : Tree -> Tree -> Int -> Array Int -> BitReader (Step (Array Int) (Array Int))
-inflateBlockDataHelp lt dt outputLength output =
+inflateBlockDataHelp : Tree -> Tree -> (Int , Array Int ) -> BitReader (Step (Int, Array Int) (Array Int))
+inflateBlockDataHelp lt dt (outputLength, output) =
     decodeSymbol lt
         |> BitReader.andThen
             (\symbol ->
                 -- check for end of block
-                if symbol == 256 then
+                if  symbol == 256 then
                     BitReader.succeed (Done output)
 
-                else if symbol < 256 then
-                    BitReader.succeed (Loop (Array.push symbol output))
+                else if  symbol < 256 then
+                    BitReader.succeed (Loop  (outputLength + 1, Array.push symbol output))
 
                 else
                     let
+                        copy : Int -> Int -> Array a -> Array a 
+                        copy source destination arr = 
+                            case Array.get source arr of 
+                                Nothing -> arr 
+                                Just value -> 
+                                    if destination < Array.length arr then 
+                                        Array.set destination value arr 
+                                    else if destination == Array.length arr then 
+                                        Array.push value arr 
+                                    else 
+                                        arr 
+
+                        loop : Int -> Int -> Int -> Int -> Array a -> Array a 
+                        loop offs length i destLen arr = 
+                            if i < offs + length then 
+                                loop offs length (i + 1) (destLen + 1) (copy i destLen arr)
+                            else 
+                                arr 
+
+
+
                         copySectionToEnd : Int -> Int -> Array Int -> Array Int
                         copySectionToEnd i end accum =
-                            Array.append accum (Array.slice (i - outputLength) (end - outputLength) accum)
+                            let section = Array.slice (i - outputLength) (end - outputLength) accum
+
+
+                            in
+                            Array.append accum section 
 
                         decodeLength : BitReader Int
                         decodeLength =
@@ -394,7 +414,7 @@ inflateBlockDataHelp lt dt outputLength output =
                                                     |> BitReader.map (\v -> ((outputLength + Array.length output) - v) - outputLength)
                                     )
                     in
-                    BitReader.map2 (\length offset -> Loop (copySectionToEnd offset (offset + length) output)) decodeLength decodeOffset
+                    BitReader.map2 (\length offset -> Loop (outputLength + length , loop offset length offset outputLength output)) decodeLength decodeOffset
             )
 
 
