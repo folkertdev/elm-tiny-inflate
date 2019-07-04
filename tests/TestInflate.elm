@@ -70,7 +70,7 @@ adler32 =
         , fuzz fuzzBytes "adler32 output is always > 0" <|
             \buffer ->
                 Adler32.adler32 buffer
-                    |> Expect.greaterThan 0
+                    |> Expect.atLeast 0
         ]
 
 
@@ -90,7 +90,7 @@ crc32 =
         , fuzz fuzzBytes "crc32 output is always > 0" <|
             \buffer ->
                 Crc32.crc32 buffer
-                    |> Expect.greaterThan 0
+                    |> Expect.atLeast 0
         ]
 
 
