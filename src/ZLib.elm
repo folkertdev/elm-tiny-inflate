@@ -30,40 +30,54 @@ slice buffer =
     Decode.decode decoder buffer
 
 
-inflate : Bytes -> Maybe Bytes
+type Error
+    = InvalidChecksum
+    | InvalidAdler { found : Int, shouldBe : Int }
+    | InvalidMethod
+    | InvalidWindowSize
+    | PresetDictionaryIssue
+    | InvalidSlice
+    | InflateError String
+
+
+inflate : Bytes -> Result Error Bytes
 inflate buffer =
     case slice buffer of
         Nothing ->
-            Nothing
+            Err InvalidSlice
 
         Just sliced ->
-            -- /* check checksum */
             if ((256 * sliced.cmf + sliced.flg) |> modBy 31) /= 0 then
-                Nothing
-                -- /* check method is deflate */
+                -- /* check checksum */
+                Err InvalidChecksum
 
             else if Bitwise.and sliced.cmf 0x0F /= 8 then
-                Nothing
-                -- /* check window size is valid */
+                -- /* check method is deflate */
+                Err InvalidMethod
 
             else if Bitwise.shiftRightBy 4 sliced.cmf > 7 then
-                Nothing
-                -- /* check there is no preset dictionary */
+                -- /* check window size is valid */
+                Err InvalidWindowSize
 
             else if Bitwise.and sliced.flg 0x20 /= 0 then
-                Nothing
+                -- /* check there is no preset dictionary */
+                Err PresetDictionaryIssue
 
             else
                 case Internal.inflate sliced.buffer of
-                    Err _ ->
-                        Nothing
+                    Err e ->
+                        Err (InflateError e)
 
                     Ok resultBuffer ->
-                        if sliced.a32 /= Adler32.adler32 resultBuffer then
-                            Nothing
+                        let
+                            found =
+                                Adler32.adler32 resultBuffer
+                        in
+                        if sliced.a32 /= found then
+                            Err (InvalidAdler { found = found, shouldBe = sliced.a32 })
 
                         else
-                            Just resultBuffer
+                            Ok resultBuffer
 
 
 decodeAdler32Checksum : Decoder Int

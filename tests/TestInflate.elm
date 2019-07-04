@@ -109,6 +109,24 @@ various =
             , setup 10 [ 5, 128, 1, 9, 0, 0, 8, 195, 38, 24, 96, 145, 172, 96, 35, 193, 226, 7, 223, 61, 28, 168, 54 ] [ 0, 16, 131, 16, 81, 128, 0, 16, 64, 0, 0, 1, 4, 16 ]
             , setup 12 [ 5, 192, 177, 16, 0, 0, 12, 4, 193, 45, 2, 16, 165, 247, 151, 186, 193, 253, 16 ] [ 0, 0, 0, 4, 16, 65, 0, 0, 0 ]
             ]
+        , describe "lots of zeros zlib" <|
+            let
+                setup index input output =
+                    test ("lot of zeros " ++ String.fromInt index) <|
+                        \_ ->
+                            case input |> toBuffer |> ZLib.inflate of
+                                Ok v ->
+                                    Just v
+                                        |> Maybe.andThen (\b -> Decode.decode (exactly (Bytes.width b) Decode.unsignedInt8) b)
+                                        |> Expect.equal (Just output)
+
+                                Err e ->
+                                    Expect.fail (Debug.toString e)
+            in
+            [ setup 0
+                [ 0x78, 0x9C, 0x63, 0x60, 0xA0, 0x1C, 0xC8, 0xE0, 0xC0, 0xA3, 0x60, 0x14, 0x8C, 0x82, 0xE1, 0x0D, 0x00, 0x9B, 0x2E, 0x00, 0xA9 ]
+                ([ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 28 ] ++ List.repeat 999 0)
+            ]
         , test "foo dynamic" <|
             \_ ->
                 [ 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06 ]
@@ -130,27 +148,24 @@ various =
                     |> External.inflate
                     |> Maybe.andThen (Decode.decode (Decode.string 3))
                     |> Expect.equal (Just "foo")
-        , test "zlib foo none" <|
-            \_ ->
-                [ 0x78, 0x01, 0x01, 0x03, 0x00, 0xFC, 0xFF, 0x66, 0x6F, 0x6F, 0x02, 0x82, 0x01, 0x45 ]
-                    |> toBuffer
-                    |> ZLib.inflate
-                    |> Maybe.andThen (Decode.decode (Decode.string 3))
-                    |> Expect.equal (Just "foo")
-        , test "zlib foo fixed" <|
-            \_ ->
-                [ 0x78, 0x5E, 0x4B, 0xCB, 0xCF, 0x07, 0x00, 0x02, 0x82, 0x01, 0x45 ]
-                    |> toBuffer
-                    |> ZLib.inflate
-                    |> Maybe.andThen (Decode.decode (Decode.string 3))
-                    |> Expect.equal (Just "foo")
-        , test "zlib foo dynamic" <|
-            \_ ->
-                [ 0x78, 0x9C, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x02, 0x82, 0x01, 0x45 ]
-                    |> toBuffer
-                    |> ZLib.inflate
-                    |> Maybe.andThen (Decode.decode (Decode.string 3))
-                    |> Expect.equal (Just "foo")
+        , describe "zlib" <|
+            let
+                setup name input output =
+                    test name <|
+                        \_ ->
+                            case input |> toBuffer |> ZLib.inflate of
+                                Ok v ->
+                                    Just v
+                                        |> Maybe.andThen (\b -> Decode.decode (Decode.string 3) b)
+                                        |> Expect.equal (Just output)
+
+                                Err e ->
+                                    Expect.fail (Debug.toString e)
+            in
+            [ setup "zlib foo none" [ 0x78, 0x01, 0x01, 0x03, 0x00, 0xFC, 0xFF, 0x66, 0x6F, 0x6F, 0x02, 0x82, 0x01, 0x45 ] "foo"
+            , setup "zlib foo fixed" [ 0x78, 0x5E, 0x4B, 0xCB, 0xCF, 0x07, 0x00, 0x02, 0x82, 0x01, 0x45 ] "foo"
+            , setup "zlib foo dynamic" [ 0x78, 0x9C, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x02, 0x82, 0x01, 0x45 ] "foo"
+            ]
         , describe "gzip foo" <|
             let
                 setup name hexes =
@@ -169,21 +184,6 @@ various =
             , setup "dynamic with checksum" [ 0x1F, 0x8B, 0x08, 0x02, 0x62, 0xD8, 0x1B, 0x5D, 0x00, 0xFF, 0x24, 0x3E, 0x05, 0xC0, 0x21, 0x0D, 0x00, 0x00, 0x00, 0x80, 0xB0, 0xB6, 0xD8, 0xF7, 0x77, 0x2C, 0x06, 0x21, 0x65, 0x73, 0x8C, 0x03, 0x00, 0x00, 0x00 ]
             ]
         ]
-
-
-zlib =
-    test "zlib" <|
-        \_ ->
-            let
-                data =
-                    [ 0x78, 0x9C, 0x63, 0x60, 0x40, 0x05, 0x32, 0x0C, 0x98, 0x00, 0x00, 0x02, 0x54, 0x00, 0x1D ]
-                        |> List.map Encode.unsignedInt8
-                        |> Encode.sequence
-                        |> Encode.encode
-            in
-            ZLib.inflate data
-                |> Maybe.andThen (\buffer -> Decode.decode (exactly 6 Decode.unsignedInt8) buffer)
-                |> Expect.equal (Just [ 0, 0, 0, 28, 0, 0 ])
 
 
 example =

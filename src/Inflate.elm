@@ -86,7 +86,7 @@ zlib adds some extra data at the front and the back. This decoder will take care
 -}
 inflateZLib : Bytes -> Maybe Bytes
 inflateZLib =
-    ZLib.inflate
+    ZLib.inflate >> Result.toMaybe
 
 
 {-| Inflate data compressed with gzip.
